@@ -26,7 +26,25 @@ async function q(sql, params = []) {
   try {
     if (!pool) return;
     await q(`
-      create table if not exists users (
+      create table if not exists users ( // One-time setup route to create sources table
+app.get("/setup-sources", async (req, res) => {
+  try {
+    await pool.query(`
+      create table if not exists sources (
+        id serial primary key,
+        type text not null,
+        url text not null,
+        name text,
+        active boolean default true,
+        created_at timestamptz default now()
+      );
+    `);
+    res.send("✅ Table 'sources' ready! You can delete this route later.");
+  } catch (e) {
+    res.send("Error: " + e.message);
+  }
+});
+
         id serial primary key,
         email text unique not null,
         password_hash text not null,
