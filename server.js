@@ -7,11 +7,11 @@ app.use(express.urlencoded({ extended: false }));
 
 // In-memory stores (reset on each deploy)
 const users = [];                 // [{ email, password }]
-const eventsPending = [];         // [{ id, title, when, city, kids }]
+const eventsPending = [];         // [{ id, title, date, when, city, kids }]
 const eventsApproved = [];        // same shape
 let nextId = 1;
 
-// Admin code (set in Render later)
+// Admin code (set in Render → Settings → Environment)
 const ADMIN_CODE = process.env.ADMIN_CODE || "letmein";
 
 const page = (title, body) => `<!doctype html><html><head>
@@ -19,9 +19,9 @@ const page = (title, body) => `<!doctype html><html><head>
 <title>${title}</title>
 <style>
 body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:#f8fafc;color:#0f172a}
-.wrap{max-width:900px;margin:6vh auto;background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:24px}
+.wrap{max-width:980px;margin:6vh auto;background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:24px}
 a.button,button{display:inline-block;margin-top:10px;padding:10px 14px;border-radius:10px;background:#0ea5e9;color:#fff;text-decoration:none;border:0;cursor:pointer}
-input,textarea{width:100%;padding:12px;border:1px solid #cbd5e1;border-radius:10px;margin:8px 0}
+input,select,textarea{width:100%;padding:12px;border:1px solid #cbd5e1;border-radius:10px;margin:8px 0}
 label{display:block;margin-top:8px}
 .badge{display:inline-block;padding:4px 8px;border:1px solid #cbd5e1;border-radius:999px;font-size:12px;background:#f1f5f9;color:#334155;margin-left:8px}
 .card{border:1px solid #e2e8f0;border-radius:14px;padding:14px;margin:10px 0;background:#fff}
@@ -30,6 +30,7 @@ table{width:100%;border-collapse:collapse;margin-top:12px}
 th,td{border:1px solid #e2e8f0;padding:8px;text-align:left;vertical-align:top}
 th{background:#f1f5f9}
 .row{display:flex;gap:8px;flex-wrap:wrap}
+.filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;align-items:end;margin:12px 0}
 </style>
 </head><body><div class="wrap">${body}</div></body></html>`;
 
@@ -37,7 +38,7 @@ th{background:#f1f5f9}
 app.get("/", (req, res) => {
   res.send(page("City Events",
 `<h1>Hello, Spokane! 👋</h1>
-<p>Now with Sign up / Log in, Submit Event, and Admin Approval.</p>
+<p>Now with Sign up / Log in, Submit Event, Admin Approval, and Filters.</p>
 <div class="row">
   <a class="button" href="/signup">Sign up</a>
   <a class="button" href="/login">Log in</a>
@@ -48,7 +49,7 @@ app.get("/", (req, res) => {
 <p><small>Users: ${users.length} • Pending: ${eventsPending.length} • Approved: ${eventsApproved.length}</small></p>`));
 });
 
-// ----- SIGNUP / LOGIN (simple, same as before)
+// ----- SIGNUP / LOGIN (simple)
 app.get("/signup", (req, res) => {
   res.send(page("Sign up",
 `<h2>Create account</h2>
@@ -84,15 +85,17 @@ app.post("/login", (req, res) => {
   res.send(page("Welcome", `<h2>Welcome, ${email}!</h2><a class="button" href="/app">Go to App</a>`));
 });
 
-// ----- SUBMIT (goes to PENDING now)
+// ----- SUBMIT (now includes a real DATE field)
 app.get("/submit", (req, res) => {
   res.send(page("Submit Event",
 `<h2>Submit an event</h2>
 <form method="POST" action="/submit">
   <label>Title</label>
   <input name="title" placeholder="e.g., Kids Storytime at Library" required />
-  <label>Date & time</label>
-  <input name="when" placeholder="e.g., Sat 10am" required />
+  <label>Date</label>
+  <input name="date" type="date" required />
+  <label>Time / details</label>
+  <input name="when" placeholder="e.g., 10:00 AM – 11:00 AM" required />
   <label>City</label>
   <input name="city" placeholder="e.g., Spokane" required />
   <label><input type="checkbox" name="kids" value="1" /> Good for kids</label>
@@ -101,24 +104,68 @@ app.get("/submit", (req, res) => {
 <p><a href="/app">Back to app</a></p>`));
 });
 app.post("/submit", (req, res) => {
-  const { title, when, city, kids } = req.body || {};
-  if (!title || !when || !city) return res.send(page("Submit Event", `<p>Please fill all fields.</p><a href="/submit">Back</a>`));
-  eventsPending.push({ id: nextId++, title, when, city, kids: !!kids });
+  const { title, date, when, city, kids } = req.body || {};
+  if (!title || !date || !when || !city) return res.send(page("Submit Event", `<p>Please fill all fields.</p><a href="/submit">Back</a>`));
+  eventsPending.push({ id: nextId++, title, date, when, city, kids: !!kids });
   res.send(page("Event submitted",
 `<p>Thanks! <strong>${title}</strong> is now pending admin approval.</p>
 <a class="button" href="/app">Back to app</a>`));
 });
 
-// ----- APP FEED (shows APPROVED only)
+// Helpers
+const unique = arr => Array.from(new Set(arr)).filter(Boolean).sort();
+
+// ----- APP FEED with FILTERS (kids + city + date)
 app.get("/app", (req, res) => {
-  const list = eventsApproved.length
-    ? eventsApproved.map(ev => `<div class="card">
+  const { kids, city, date } = req.query;
+
+  // Build filterable options from approved events
+  const cities = unique(eventsApproved.map(e => e.city));
+
+  // Apply filters
+  let filtered = [...eventsApproved];
+  if (kids === "1") filtered = filtered.filter(e => e.kids);
+  if (city) filtered = filtered.filter(e => e.city.toLowerCase() === city.toLowerCase());
+  if (date) filtered = filtered.filter(e => e.date === date);
+
+  const options = cities.map(c => `<option value="${c}" ${c.toLowerCase()===String(city||"").toLowerCase()?"selected":""}>${c}</option>`).join("");
+
+  const filters = `
+  <form method="GET" class="filters">
+    <div>
+      <label>City</label>
+      <select name="city">
+        <option value="">All cities</option>
+        ${options}
+      </select>
+    </div>
+    <div>
+      <label>Date</label>
+      <input type="date" name="date" value="${date||""}" />
+    </div>
+    <div>
+      <label>Good for kids</label>
+      <select name="kids">
+        <option value="">Any</option>
+        <option value="1" ${kids==="1"?"selected":""}>Yes</option>
+      </select>
+    </div>
+    <div>
+      <button>Apply filters</button>
+      <a class="button" style="background:#e2e8f0;color:#0f172a" href="/app">Clear</a>
+    </div>
+  </form>`;
+
+  const list = filtered.length
+    ? filtered.map(ev => `<div class="card">
          <div><strong>${ev.title}</strong>${ev.kids ? ' <span class="badge">Kids</span>' : ''}</div>
-         <div><small>${ev.when} • ${ev.city}</small></div>
+         <div><small>${ev.date} • ${ev.when} • ${ev.city}</small></div>
        </div>`).join("")
-    : `<p>No approved events yet. <a href="/submit">Submit one</a>!</p>`;
+    : `<p>No matching events. Try clearing filters.</p>`;
+
   res.send(page("City Events • Feed",
 `<h2>Local Events</h2>
+${filters}
 ${list}
 <div style="margin-top:12px" class="row">
   <a class="button" href="/submit">Submit Event</a>
@@ -126,7 +173,7 @@ ${list}
 </div>`));
 });
 
-// ----- ADMIN (enter code → see pending → approve/reject)
+// ----- ADMIN (same flow, now shows date)
 app.get("/admin", (req, res) => {
   const { code } = req.query;
   if (code !== ADMIN_CODE) {
@@ -143,7 +190,7 @@ app.get("/admin", (req, res) => {
     ? eventsPending.map(ev => `
       <tr>
         <td>${ev.id}</td>
-        <td><strong>${ev.title}</strong><div><small>${ev.when} • ${ev.city}</small></div></td>
+        <td><strong>${ev.title}</strong><div><small>${ev.date} • ${ev.when} • ${ev.city}</small></div></td>
         <td>${ev.kids ? "Yes" : "No"}</td>
         <td>
           <form method="POST" action="/admin/approve" style="display:inline">
@@ -166,9 +213,9 @@ app.get("/admin", (req, res) => {
   <tr><th>ID</th><th>Event</th><th>Kids</th><th>Actions</th></tr>
   ${rows}
 </table>
-<div class="row">
+<div class="row" style="margin-top:10px">
   <a class="button" href="/app">View App</a>
-  <a class="button" href="/?">Home</a>
+  <a class="button" href="/">Home</a>
 </div>`));
 });
 
@@ -198,4 +245,3 @@ app.get("/health", (_req, res) =>
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log("Server running on port " + PORT));
-
