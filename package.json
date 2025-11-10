@@ -1,14 +1,17 @@
 {
   "name": "city-events",
   "version": "1.0.0",
-  "type": "module",
+  "description": "Local city events app with signup, submissions, and auto-import from calendar feeds",
   "main": "server.js",
-  "scripts": { "start": "node server.js" },
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
   "dependencies": {
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "express": "^4.19.2",
-    "pg": "^8.12.0",
-    "node-ical": "^0.16.1"
+    "node-ical": "^0.16.1",
+    "pg": "^8.11.5"
   }
 }
